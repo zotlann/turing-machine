@@ -38,7 +38,6 @@
     (define right (append (cdr (string->list str)) (list *blank-symbol*)))
     (lambda (method . args)
       (cond
-       [(eq? method 'get-tape) (list left head right)]
        [(eq? method 'read) head]
        [(eq? method 'write) (set! head (car args))]
        [(eq? method 'move-right) (begin (set! left (append left (list head)))
@@ -58,85 +57,95 @@
        [(eq? method 'get-string)
 	(if *remove-blank-symbol?*
 	    (string-append (list->string (remove *blank-symbol* left))
-			   (list->string (list head)) 
+			   (list->string (remove *blank-symbol* (list head))) 
 			   (list->string (remove *blank-symbol* right)))
 	    (string-append (list->string left) 
 			   (list->string (list head)) 
-			   (list->string right)))]
-       (else (begin
-              (display "INVALID METHOD ON TAPE: ")
-	      (display method)(newline)))))))
+			   (list->string right)))]))))
 
-;constructs a tape with initial state q0, final-state qf
+;Bindings for tape methods
+(define read-tape
+  (lambda (tape)
+    (tape 'read)))
+
+(define write-tape
+  (lambda (tape char)
+    (tape 'write char)))
+
+(define move-left
+  (lambda (tape)
+    (tape 'move-left)))
+
+(define move-right
+  (lambda (tape)
+    (tape 'move-right)))
+
+(define get-tape-string
+  (lambda (tape)
+    (tape 'get-string)))
+
+;constructs a tm with initial state q0, final-state qf
 ;and with a list of transitions tr
 ;q0 and qf should be quoted symbols that match the initial and final states
 ;respectively
-;tr is an assoc list in the form:
-;(current-state read-character (write-character direction resulting-state)
-;eg: (q0 . #\A (#\B R q1))
-;for a transition function that while in state q0 replaces #\A with #\B
-;and moves the read-write head write, and results in state q1
-;you can also use the procedure format-transition on a flat list in the same 
-;form to result in an appropriate format.
-;eg: (format-transition '(q0 #\A #\B R q1)) for the above transition
-;returns a procedure that takes 1 argument
-;'get-initial-state returns initial-state
-;'get-final-state returns final-state
-;'get-transitions returns transitions
-;'display-transitions prints the transition functions
+;tr is a list of transitions in the form
+;(current-state read-symbol write-symbol direction resulting-state)
+;direction is either 'L for left or 'R for right
+;eg: (q0 #\A #\B R q0)
+;for a state that replaces A with B and moves to the right
+;What is returned is a function that takes a string as input, and 
+;outputs the result for applying the tm to the string
+;Because the output is a function that takes a string, turing machines
+;can be combined through the composite function to feed a string through
+;multiple turing machines
 (define make-tm
   (lambda (q0 qf tr)
     (define initial-state q0)
     (define final-state qf)
-    (define transitions tr)
-    (lambda (method)
-      (cond
-       [(eq? method 'get-initial-state) initial-state]
-       [(eq? method 'get-final-state) final-state]
-       [(eq? method 'get-transitions) transitions]
-       [(eq? method 'display-transitions) 
-	(display-transitions (map flatten transitions))]
-       (else (begin
-              (display "INVALID METHOD ON TM: ")
-	      (display method)(newline)))))))
+    (define transitions (format-transitions tr))
+    (define get-transition
+      (lambda (tape current-state)
+	(let* ((read-symbol (read-tape tape))
+	       (write-dir-resulting (assoc (cons current-state read-symbol)
+					   transitions)))
+	  (if write-dir-resulting
+	      (set! write-dir-resulting (cdr write-dir-resulting)))
+	  (if write-dir-resulting
+	      (lambda (tape)
+		(write-tape tape (get-write-symbol write-dir-resulting))
+		(if (eq? 'L (get-direction write-dir-resulting))
+		    (move-left tape)
+		    (move-right tape))
+		(get-resulting-state write-dir-resulting))
+	      #f))))
+    (lambda (str)
+      (define helper
+	(lambda (tape current-state)
+	  (cond
+	    [(eq? final-state current-state) (get-tape-string tape)]
+	    (else (let ((transition (get-transition tape current-state)))
+		    (if transition
+			(helper tape (transition tape))
+			#f))))))
+      (helper (make-tape str) initial-state))))
 
-;Constructs and returns a function that takes a tape, performs the
-;appropriate write and movement operations on that tape and returns
-;the state resulting from those operations
-;If there is no transition function for the current-state on the 
-;symbol at the read-write head of the tape, this returns #f
-(define get-transition
-  (lambda (machine tape current-state)
-    (let* ((read-symbol (tape 'read))
-           (write-dir-resulting (assoc (cons current-state read-symbol)
-				       (machine 'get-transitions))))
-      (if write-dir-resulting
-          (set! write-dir-resulting (cdr write-dir-resulting)))
-      (if write-dir-resulting
-          (lambda (tape)
-            (tape 'write (car write-dir-resulting))
-            (if (eq? 'L (cadr write-dir-resulting))
-                (tape 'move-left)
-                (tape 'move-right))
-            (caddr write-dir-resulting))
-          #f))))
+;given the triplet (write-symbol direction resulting-state
+;return the write-symbol
+(define get-write-symbol
+  (lambda (triplet)
+    (car triplet)))
 
-;applies the constructed turing machine tm to a given input string
-;returns the string after the turing machine halts if it halts in 
-;a final state
-;if the turing machine does not halt in a final state, it returns #f
-(define apply-tm
-  (lambda (tm str)
-    (define tape (make-tape str))
-    (define helper
-      (lambda (tm tape current-state)
-        (cond
-         [(eq? (tm 'get-final-state) current-state) (tape 'get-string)]
-         (else (let ((transition (get-transition tm tape current-state)))
-                 (if transition
-                     (helper tm tape (transition tape))
-                     #f))))))
-    (helper tm tape (tm 'get-initial-state))))
+;given the triplet (write-symbol direction resulting-state) 
+;return the direction
+(define get-direction
+  (lambda (triplet)
+    (cadr triplet)))
+
+;given the triplet (write-symbol direction resulting state)
+;return the resulting state
+(define get-resulting-state
+  (lambda (triplet)
+    (caddr triplet)))
 
 ;flattens a list, used when printing transitions for a tm
 (define flatten
@@ -145,6 +154,14 @@
       [(null? lst) '()]
       [(pair? lst) (append (flatten (car lst)) (flatten (cdr lst)))]
       (else (list lst)))))
+
+;returns a list equal to lst with all instances of tar removed
+(define remove
+  (lambda (tar lst)
+    (cond
+      [(null? lst) '()]
+      [(equal? (car lst) tar)(remove tar (cdr lst))]
+      (else (cons (car lst) (remove tar (cdr lst)))))))
 
 ;takes a transition function in the form:
 ;'(current state read-symbol write-symbol direciton resulting-state)
@@ -158,14 +175,14 @@
 		(car (cdddr lst))
 		(car (cddddr lst))))))
 
-;display the transition functions of a turing machine in the format
-;(current-state read-character write-character direction resulting-state)
-;.
-;.
-;.
-(define display-transitions
-  (lambda (transitions)
-    (if (not (null? transitions))
-	(begin (display (car transitions))
-	       (newline)
-	       (display-transitions (cdr transitions))))))
+;takes a list of transitions and formats them as alists for use in a tm
+(define format-transitions
+  (lambda (trans-lst)
+    (map format-transition trans-lst)))
+
+
+;returns the composite of two functions, used to combine tms
+(define composite
+  (lambda (f g)
+    (lambda (x)
+      (f (g x)))))

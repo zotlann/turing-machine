@@ -1,3 +1,6 @@
+;Constructs a turing machine reverse-tm that when applied to a string 
+;from {0,1}*, it will return the reversed binary string
+;returns #f for strings not in {0,1}*
 (load "tm.scm")
 (define reverse-transitions
   '(
@@ -31,9 +34,8 @@
     (q5 #\1 #\1 R qf)
     (q5 #\Z #\# R q5)))
 
-(define reverse-tm (make-tm 'q0 'qf (map format-transition reverse-transitions)))
-(display "F(w) = w^R: ")
-(reverse-tm 'display-transitions)
+(define reverse-tm (make-tm 'q0 'qf reverse-transitions))
+(display "F(w) = w^R: ")(newline)
 (define rev-string "100111010110")
 (display rev-string)(display "->")
-(display (apply-tm reverse-tm rev-string))(newline)
+(display (reverse-tm rev-string))(newline)
